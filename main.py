@@ -4,80 +4,79 @@ import google.generativeai as genai
 import requests
 import time
 
-# 1. 비밀 금고에서 열쇠 꺼내기
+# 1. 환경 설정 (비밀 금고)
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# 제미나이 요정 설정 (2026 최신 안정화 주소 사용)
+# 제미나이 초기화
 genai.configure(api_key=GEMINI_API_KEY)
+
+def get_working_model():
+    """2026년 기준 가장 안정적인 모델 호칭을 자동으로 찾습니다."""
+    # 시도할 호칭 리스트 (최신 순)
+    titles = ['gemini-2.0-flash', 'gemini-1.5-flash', 'models/gemini-1.5-flash']
+    
+    for title in titles:
+        try:
+            model = genai.GenerativeModel(title)
+            # 아주 짧은 테스트로 모델 존재 여부 확인
+            model.generate_content("hi", generation_config={"max_output_tokens": 1})
+            print(f"✅ 연결 성공: {title}")
+            return model
+        except Exception:
+            continue
+    return None
 
 def send_discord(message):
     if DISCORD_WEBHOOK_URL:
-        payload = {"content": message}
-        requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
 
-def get_stock_analysis():
-    # 분석하고 싶은 종목들 (관심 있으신 종목 위주로 꽉 채웠어요!)
+def run_analysis():
+    # 준희님이 관심 가지시는 종목 리스트 (Veritas 분석 엔진 가동)
     tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META', 'JEPI']
-    final_message = "☀️ **2026년형 미국 주식 아침 브리핑** ☀️\n\n"
     
-    # 요정 부르기 (가장 안정적인 모델 이름으로 시도)
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except:
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+    model = get_working_model()
+    if not model:
+        send_discord("🚨 [시스템 오류] 제미나이 모델 주소를 찾을 수 없습니다. 라이브러리 버전을 확인해주세요.")
+        return
 
+    final_report = "☀️ **2026 Veritas 미국 주식 모닝 브리핑** ☀️\n\n"
+    
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
+            # 최근 5일치 데이터를 가져와서 흐름 파악
+            hist = stock.history(period="5d")
+            if hist.empty: continue
             
-            # 주가 데이터 가져오기
-            hist = stock.history(period="2d") # 어제와 그저께 데이터 비교
-            if hist.empty:
-                continue
-                
-            today_close = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2]
-            change_percent = ((today_close - prev_close) / prev_close) * 100
-            volume = hist['Volume'].iloc[-1]
+            curr_price = hist['Close'].iloc[-1]
+            prev_price = hist['Close'].iloc[-2]
+            change = ((curr_price - prev_price) / prev_price) * 100
             
-            # 뉴스 제목 찾아내기 (더 꼼꼼한 버전)
-            news_text = "특별한 뉴스가 없습니다."
-            try:
-                raw_news = stock.news
-                titles = []
-                for n in raw_news[:3]:
-                    t = n.get('title') or (n.get('content') and n.get('content').get('title'))
-                    if t: titles.append(t)
-                if titles:
-                    news_text = " / ".join(titles)
-            except:
-                pass
+            # 뉴스 수집 (2026년 바뀐 뉴스 구조 대응)
+            news_items = stock.news
+            titles = [n.get('title') or n.get('content', {}).get('title', '') for n in news_items[:2]]
+            news_summary = " / ".join(filter(None, titles)) or "주요 뉴스 없음"
 
-            # 요정에게 분석 요청 (프롬프트 강화)
+            # 전문가 페르소나 주입
             prompt = f"""
-            너는 주식 분석 전문가야. 아래 데이터를 보고 초보자도 이해하기 쉽게 3문장으로 요약해줘.
-            - 종목: {ticker}
-            - 현재가: ${today_close:.2f} (전일대비 {change_percent:.2f}%)
-            - 거래량: {volume:,}
-            - 주요 뉴스: {news_text}
+            당신은 월가 출신의 투자 전문가입니다. 
+            종목: {ticker} (현재가 ${curr_price:.2f}, 변동률 {change:+.2f}%)
+            최근 뉴스: {news_summary}
             
-            어제 차트의 움직임이 긍정적인지 부정적인지, 뉴스가 어떤 영향을 줬는지 아주 쉽게 설명해줘.
+            위 데이터를 보고 오늘 장의 핵심 관전 포인트를 2문장으로 아주 명료하게 분석하세요.
             """
             
             response = model.generate_content(prompt)
-            analysis = response.text
+            final_report += f"📊 **{ticker}**: {response.text.strip()}\n\n"
             
-            final_message += f"📊 **{ticker}** (${today_close:.2f})\n{analysis}\n\n"
-            
-            # 너무 빨리 요청하면 요정이 힘들어하니 1초씩 쉬어주기
-            time.sleep(1)
+            # API 과부하 방지를 위한 짧은 휴식
+            time.sleep(1.5)
             
         except Exception as e:
-            final_message += f"📊 **{ticker}** 분석 중 작은 문제가 생겼어요: {e}\n\n"
-            
-    return final_message
+            final_report += f"📊 **{ticker}**: 분석 스킵 (원인: {str(e)[:30]}...)\n\n"
+
+    send_discord(final_report)
 
 if __name__ == "__main__":
-    report = get_stock_analysis()
-    send_discord(report)
+    run_analysis()
