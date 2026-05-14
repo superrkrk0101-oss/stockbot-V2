@@ -9,7 +9,7 @@ GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 
 # 제미나이 요정 설정
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 # 2. 분석할 종목 리스트 (따옴표를 각각 입혀서 6개 모두 인식하게 수정했습니다!)
 tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META']
