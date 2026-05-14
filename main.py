@@ -56,7 +56,7 @@ def get_stock_analysis():
             final_message += f"📊 **{ticker} (현재 ${close_price})**\n💡 **빅이슈 & 차트 분석:**\n{analysis}\n\n"
             
         except Exception as e:
-            final_message += f"📊 **{ticker}** 데이터를 분석하는 데 문제가 발생했어요.\n\n"
+            final_message += f"📊 **{ticker}** 에러 발생! 범인 확인: {e}\n\n"
             
     return final_message
 
