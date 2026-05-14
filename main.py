@@ -3,16 +3,16 @@ import yfinance as yf
 import google.generativeai as genai
 import requests
 
-# 1. 금고에서 열쇠 꺼내기
+# 1. 금고에서 비밀번호와 열쇠 꺼내기
 DISCORD_WEBHOOK_URL = os.environ['DISCORD_WEBHOOK_URL']
 GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 
-# 제미나이 요정 세팅
+# 제미나이 요정 설정
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 2. 내가 매일 아침 분석받고 싶은 주식들
-tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG, SERV, META']
+# 2. 분석할 종목 리스트 (따옴표를 각각 입혀서 6개 모두 인식하게 수정했습니다!)
+tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META']
 
 def send_discord(message):
     payload = {"content": message}
@@ -25,7 +25,7 @@ def get_stock_analysis():
         try:
             stock = yf.Ticker(ticker)
             
-            # 차트/거래량 팩트 가져오기
+            # 주가 데이터 가져오기
             hist = stock.history(period="1d")
             if hist.empty:
                 continue
@@ -33,30 +33,41 @@ def get_stock_analysis():
             open_price = round(hist['Open'].iloc[0], 2)
             volume = hist['Volume'].iloc[0]
             
-            # 어제 뉴스 팩트 가져오기
-            news_items = stock.news
-            news_titles = [item['title'] for item in news_items[:3]] if news_items else ["최근 특별한 뉴스가 없습니다."]
-            news_text = " / ".join(news_titles)
+            # [핵심] 야후 파이낸스 뉴스 제목(Title) 살려내기
+            news_text = "최근 특별한 뉴스가 없습니다."
+            try:
+                news_items = stock.news
+                if news_items:
+                    news_titles = []
+                    for item in news_items[:3]:
+                        # 1순위: 'title' 바로 찾기 / 2순위: 'content' 상자 안의 'title' 찾기
+                        title = item.get('title') or item.get('content', {}).get('title')
+                        if title:
+                            news_titles.append(title)
+                    
+                    if news_titles:
+                        news_text = " / ".join(news_titles)
+            except:
+                pass # 뉴스를 못 가져와도 분석은 계속 진행
             
-            # 제미나이에게 엄격하게 명령하기 (팩트와 가정 분리)
+            # 제미나이에게 차트+거래량+뉴스 제목을 주고 분석 요청
             prompt = f"""
-            너는 주식 초보자에게 아주 친절하게 설명해주는 주식 전문가야. 
-            절대 없는 정보를 지어내지 말고, 실제 데이터(팩트)와 너의 분석(가정)을 명확하게 구분해서 작성해.
+            너는 주식 전문가야. 아래 팩트 데이터를 바탕으로 3~4문장으로 요약해줘.
+            종목: {ticker}
+            어제 종가: {close_price}달러 / 거래량: {volume}
+            최근 뉴스 제목: {news_text}
             
-            종목명: {ticker}
-            어제 종가: {close_price}달러, 시가: {open_price}달러, 거래량: {volume}
-            어제 주요 뉴스 제목들: {news_text}
-            
-            위 실제 데이터를 바탕으로, 오늘 이 주식의 차트 흐름과 거래량의 의미, 그리고 어제 있었던 이슈가 주가에 미친 영향을 딱 3~4문장으로 아주 쉽고 명확하게 정리해줘.
+            내용에는 반드시 어제 차트 흐름의 의미와 뉴스 이슈가 주가에 준 영향을 포함해줘. 초보자도 이해하기 쉽게 설명해줘.
             """
             
             response = model.generate_content(prompt)
             analysis = response.text
             
-            final_message += f"📊 **{ticker} (현재 ${close_price})**\n💡 **빅이슈 & 차트 분석:**\n{analysis}\n\n"
+            final_message += f"📊 **{ticker} (현재 ${close_price})**\n💡 **전문가 분석:**\n{analysis}\n\n"
             
         except Exception as e:
-            final_message += f"📊 **{ticker}** 에러 발생! 범인 확인: {e}\n\n"
+            # 혹시라도 에러가 나면 어떤 이유인지 디스코드로 알려줍니다.
+            final_message += f"📊 **{ticker}** 분석 중 에러 발생: {e}\n\n"
             
     return final_message
 
