@@ -4,23 +4,19 @@ import google.generativeai as genai
 import requests
 import time
 
-# 1. 환경 설정 (비밀 금고 데이터)
+# 1. 환경 설정
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# 제미나이 설정
 genai.configure(api_key=GEMINI_API_KEY)
 
 def get_best_model():
-    """구글 서버에서 현재 사용 가능한 최적의 모델 이름을 자동으로 찾아옵니다."""
+    """현재 사용 가능한 최적의 모델을 자동으로 찾습니다."""
     try:
         for m in genai.list_models():
-            # 'flash' 모델 중 콘텐츠 생성이 가능한 가장 최신 모델을 고릅니다.
             if 'flash' in m.name.lower() and 'generateContent' in m.supported_generation_methods:
                 return m.name
-    except:
-        pass
-    # 만약 목록 조회가 안 되면 가장 표준적인 이름을 반환합니다.
+    except: pass
     return 'models/gemini-1.5-flash'
 
 def send_discord(message):
@@ -28,20 +24,12 @@ def send_discord(message):
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
 
 def run_analysis():
-    # 준희님이 투자 중인 종목들 (NVDA, PLTR, JEPI 등)
     tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META', 'JEPI']
-    
-    # 서버에서 모델 이름을 자동으로 가져옵니다.
     target_model = get_best_model()
-    
-    try:
-        model = genai.GenerativeModel(target_model)
-    except Exception as e:
-        send_discord(f"🚨 모델 연결 불가: {e}")
-        return
+    model = genai.GenerativeModel(target_model)
 
-    # 리포트 시작 (사용 중인 엔진 이름을 표시해줍니다)
-    report = f"☀️ **2026 미국 주식 모닝 브리핑 (엔진: {target_model.split('/')[-1]})** ☀️\n\n"
+    report = f"☀️ **2026 미국 주식 모닝 리포트** ☀️\n"
+    report += f"*(분석 엔진: {target_model.split('/')[-1]})*\n\n"
     
     for ticker in tickers:
         try:
@@ -49,22 +37,35 @@ def run_analysis():
             hist = stock.history(period="2d")
             if hist.empty: continue
             
-            price = hist['Close'].iloc[-1]
-            change = ((price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
+            curr_p = hist['Close'].iloc[-1]
+            prev_p = hist['Close'].iloc[-2]
+            change = ((curr_p - prev_p) / prev_p) * 100
+            volume = hist['Volume'].iloc[-1] # 거래량 데이터 추출
             
-            # 뉴스 수집
             news = stock.news
             titles = [n.get('title') or n.get('content', {}).get('title', '') for n in news[:2]]
             news_str = " / ".join(filter(None, titles)) or "최근 뉴스 없음"
 
-            # AI 분석 요청
-            prompt = f"{ticker}(${price:.2f}, {change:+.2f}%)와 뉴스({news_str})를 보고 오늘 투자자가 알아야 할 핵심을 2문장으로 요약해줘."
+            # 가시성을 극대화한 프롬프트 설계
+            prompt = f"""
+            주식 전문가로서 {ticker}를 분석하세요.
+            [데이터] 현재가: ${curr_p:.2f} ({change:+.2f}%), 거래량: {volume:,}주, 주요뉴스: {news_str}
+            
+            아래 형식을 엄격히 지켜 답변하세요:
+            • **시장 팩트**: 가격 변동과 거래량 수치가 갖는 의미를 한 줄 요약.
+            • **핵심 이슈**: 뉴스나 섹터 호재가 미친 영향 분석.
+            • **투자 관점**: 오늘 투자자가 주의 깊게 봐야 할 포인트.
+            """
             
             response = model.generate_content(prompt)
-            report += f"📊 **{ticker}**: {response.text.strip()}\n\n"
             
-            # 구글 서버에 무리가 가지 않게 2초씩 쉬어줍니다.
-            time.sleep(2)
+            # 종목별 가독성 높은 포맷 구성
+            report += f"━━━━━━━━━━━━━━━━━━\n"
+            report += f"### 📊 **{ticker}** | ${curr_p:.2f} ({change:+.2f}%)\n"
+            report += f"{response.text.strip()}\n\n"
+            
+            # 429 에러 방지를 위해 휴식 시간을 5초로 연장
+            time.sleep(5)
             
         except Exception as e:
             report += f"📊 **{ticker}**: 분석 스킵 (사유: {str(e)[:30]})\n\n"
