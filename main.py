@@ -38,68 +38,67 @@ def get_stock_data(ticker):
         price = round(curr['Close'], 2)
         change = round(((curr['Close'] - prev['Close']) / prev['Close']) * 100, 2)
         
-        ma5 = round(df['Close'].rolling(window=5).mean().iloc[-1], 2)
-        ma20 = round(df['Close'].rolling(window=20).mean().iloc[-1], 2)
-        ma60 = round(df['Close'].rolling(window=60).mean().iloc[-1], 2)
-        ma120 = round(df['Close'].rolling(window=120).mean().iloc[-1], 2)
+        ma_data = {
+            '5': round(df['Close'].rolling(window=5).mean().iloc[-1], 2),
+            '20': round(df['Close'].rolling(window=20).mean().iloc[-1], 2),
+            '60': round(df['Close'].rolling(window=60).mean().iloc[-1], 2),
+            '120': round(df['Close'].rolling(window=120).mean().iloc[-1], 2)
+        }
         rsi = round(calculate_rsi(df['Close']).iloc[-1], 2)
-        
-        avg_vol_20 = df['Volume'].tail(20).mean()
-        vol_ratio = round((curr['Volume'] / avg_vol_20) * 100, 1)
+        vol_ratio = round((curr['Volume'] / df['Volume'].tail(20).mean()) * 100, 1)
 
-        eps = info.get('trailingEps', 0)
-        pe_ratio = info.get('trailingPE', 0)
-        
         p_ticker = PEERS.get(ticker)
-        peer_info = "비교 대상 없음"
+        peer_info = "N/A (Dominant Market Position)"
         if p_ticker:
             p_hist = yf.Ticker(p_ticker).history(period="2d")
             if not p_hist.empty:
-                p_change = round(((p_hist['Close'].iloc[-1] - p_hist['Close'].iloc[-2]) / p_hist['Close'].iloc[-2]) * 100, 2)
-                p_sign = "+" if p_change > 0 else ""
-                peer_info = f"{p_ticker} ({p_sign}{p_change}%)"
+                p_chg = round(((p_hist['Close'].iloc[-1] - p_hist['Close'].iloc[-2]) / p_hist['Close'].iloc[-2]) * 100, 2)
+                peer_info = f"{p_ticker} ({'+' if p_chg > 0 else ''}{p_chg}%)"
 
         news = " / ".join([n.get('title', '') for n in stock.news[:3]])
 
         return {
             'ticker': ticker, 'price': price, 'change': change,
-            'ma': {'5': ma5, '20': ma20, '60': ma60, '120': ma120},
-            'rsi': rsi, 'vol_ratio': vol_ratio, 'peer': peer_info,
-            'eps': eps, 'pe': pe_ratio, 'news': news
+            'ma': ma_data, 'rsi': rsi, 'vol_ratio': vol_ratio, 
+            'peer': peer_info, 'eps': info.get('trailingEps', 0), 
+            'pe': info.get('trailingPE', 0), 'news': news
         }
     except Exception as e:
-        print(f"{ticker} 데이터 수집 중 에러: {e}")
+        print(f"{ticker} Error: {e}")
         return None
 
 def get_ai_analysis(data):
+    """영문 분석 후 한국어 번역 프로세스"""
     sign = "+" if data['change'] > 0 else ""
     
-    # [프롬프트 대폭 수정] 한자 금지 및 시각화 구조 강제
+    # Step 1: Professional Analysis in English
+    # Step 2: Translate to Clean Korean (No Hanja)
     prompt = f"""
-    당신은 월스트리트의 시니어 수석 애널리스트입니다. 
-    다음 데이터를 바탕으로 {data['ticker']} 종목에 대한 분석 리포트를 작성하세요.
+    [Task 1: Deep Analysis]
+    As a Wall Street Senior Analyst, analyze {data['ticker']} based on:
+    - Price: ${data['price']} ({sign}{data['change']}%)
+    - Moving Averages: 5D(${data['ma']['5']}), 20D(${data['ma']['20']}), 60D(${data['ma']['60']}), 120D(${data['ma']['120']})
+    - RSI: {data['rsi']} / Volume Ratio: {data['vol_ratio']}%
+    - Peer Performance: {data['peer']}
+    - Fundamentals: EPS {data['eps']}, P/E {data['pe']}
+    - News: {data['news']}
 
-    [데이터 정보]
-    - 티커: {data['ticker']} / 현재가: ${data['price']} ({sign}{data['change']}%)
-    - 이동평균선: 5일(${data['ma']['5']}), 20일(${data['ma']['20']}), 60일(${data['ma']['60']}), 120일(${data['ma']['120']})
-    - RSI: {data['rsi']} / 거래량 비율: {data['vol_ratio']}%
-    - 경쟁사({data['peer']}) 대비 성과
-    - 재무상태: EPS {data['eps']}, P/E {data['pe']}
-    - 핵심 뉴스: {data['news']}
+    [Task 2: Translation & Formatting]
+    Translate the analysis into professional Korean using the format below.
+    CRITICAL RULES:
+    1. STRICTLY NO CHINESE CHARACTERS (Hanja). Use pure Korean or standard financial terms.
+    2. Use Bullet points (▶) for visibility.
+    3. Tone: Polite and professional (존댓말).
+    4. ONLY output the final Korean translation.
 
-    [작성 규칙 - 필독]
-    1. **한자 절대 금지**: 모든 한자(예: 變化, 競爭, 壓力)를 한글로만 적으세요.
-    2. **가시성 최우선**: 줄글로 길게 쓰지 말고, 아래의 [출력 형식]을 반드시 따르세요.
-    3. **전문성**: 수치에 기반하여 냉철하게 분석하되, 부드러운 존댓말을 사용하세요.
-    4. 분석 내용만 출력하고, 인사말이나 "분석 결과입니다" 같은 서론은 생략하세요.
-
-    [출력 형식]
-    ▶ **기술적 관점**: (이평선 정배열 여부, 거래량 신뢰도, RSI를 이용한 과매수/과매도 분석)
-    ▶ **시장 및 경쟁**: (경쟁사 대비 성과 및 시장 내 위치 분석)
-    ▶ **밸류에이션**: (현재 주가가 실적 대비 저평가인지 고평가인지 판단)
-    ▶ **리스크 및 전망**: (단기 주의 사항 및 향후 주가 방향성)
+    [Output Format]
+    ▶ **기술적 관점**: (Moving average trends, volume reliability, RSI analysis)
+    ▶ **시장 및 경쟁**: (Relative performance against peers or market position)
+    ▶ **밸류에이션**: (Assessment of price relative to EPS and P/E)
+    ▶ **리스크 및 전망**: (Short-term risks and future outlook)
     """
     
+    # AI 엔진 호출 (Gemini 우선)
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
@@ -118,7 +117,7 @@ def get_ai_analysis(data):
             return comp.choices[0].message.content, "Groq"
         except: pass
     
-    return "분석 생성에 실패했습니다.", "None"
+    return "분석 생성 실패", "None"
 
 def send_to_discord(message):
     if DISCORD_WEBHOOK_URL:
@@ -127,7 +126,7 @@ def send_to_discord(message):
 
 def main():
     today = datetime.now().strftime('%Y-%m-%d')
-    header = f"🚀 **{today} 월스트리트 모닝 리포트 (V7.3)**\n"
+    header = f"🚀 **{today} 월스트리트 모닝 리포트 (V7.4)**\n"
     header += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     send_to_discord(header)
 
@@ -138,13 +137,12 @@ def main():
             sign = "+" if data['change'] > 0 else ""
             emoji = "📈" if data['change'] >= 0 else "📉"
             
-            # 리포트 가시성 강화
-            stock_report = f"### {emoji} {data['ticker']} | `${data['price']}` ({sign}{data['change']}%)\n"
-            stock_report += f"> **분석 엔진**: `{engine}`\n"
-            stock_report += f"{analysis_text.strip()}\n"
-            stock_report += "\n"
+            report = f"### {emoji} {data['ticker']} | `${data['price']}` ({sign}{data['change']}%)\n"
+            report += f"> **분석 엔진**: `{engine}`\n"
+            report += f"{analysis_text.strip()}\n"
+            report += "──────────────────────────\n"
             
-            send_to_discord(stock_report)
+            send_to_discord(report)
             time.sleep(1)
 
 if __name__ == "__main__":
