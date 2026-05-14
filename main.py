@@ -4,124 +4,112 @@ import google.generativeai as genai
 from groq import Groq
 import requests
 from datetime import datetime
-import json
-import re
 
-# [1] API 설정 및 초기화
+# [1] 설정 및 보안키 로드
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
-
-genai.configure(api_key=GEMINI_API_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
+GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
 TICKERS = ['NVDA', 'TSLA', 'CEG', 'WCC', 'SERV', 'LUNR']
 
 def send_to_discord(message):
     if not DISCORD_WEBHOOK_URL: return
     try:
-        # 메시지 길이 제한(2000자) 대응
+        # 긴 메시지는 안전하게 분할 전송
         for i in range(0, len(message), 1900):
             requests.post(DISCORD_WEBHOOK_URL, json={"content": message[i:i+1900]}, timeout=10)
     except: pass
 
-def get_ai_response(prompt):
-    """Gemini 시도 후 실패 시 Groq 시도"""
-    # 1. Gemini 시도
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        if response.text: return response.text, "Gemini"
-    except Exception as e:
-        print(f"Gemini Error: {e}")
+def get_ai_analysis(input_data):
+    """Gemini 시도 -> 실패 시 Groq 시도 -> 에러 로그 수집"""
+    prompt = f"""
+    당신은 한국의 주식 전문가입니다. 아래 뉴스 데이터를 읽고 각 종목별로 '한국어' 요약을 1~2문장으로 작성하세요.
+    반드시 '종목명: 요약내용' 형식을 지켜주세요. 다른 인사는 하지 마세요.
+    
+    데이터:
+    {input_data}
+    """
+    
+    errors = []
 
-    # 2. Groq 시도
-    if groq_client:
+    # 1트랙: Gemini (최신 3 Flash 시도)
+    if GEMINI_KEY:
         try:
-            completion = groq_client.chat.completions.create(
+            genai.configure(api_key=GEMINI_KEY)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            if response.text: return response.text, "Gemini"
+        except Exception as e:
+            errors.append(f"Gemini API 에러: {str(e)[:50]}")
+
+    # 2트랙: Groq (Llama 3 시도)
+    if GROQ_KEY:
+        try:
+            client = Groq(api_key=GROQ_KEY)
+            completion = client.chat.completions.create(
                 model="llama3-8b-8192",
                 messages=[{"role": "user", "content": prompt}]
             )
-            return completion.choices[0].message.content, "Groq"
+            return completion.choices[0].message.content, "Groq (Llama 3)"
         except Exception as e:
-            print(f"Groq Error: {e}")
-            
-    return None, None
+            errors.append(f"Groq API 에러: {str(e)[:50]}")
+    else:
+        errors.append("Groq API 키가 설정되지 않았습니다.")
 
-def parse_analysis(raw_text, ticker_count):
-    """AI의 답변에서 JSON만 쏙 뽑아내거나 수동으로 파싱합니다."""
-    try:
-        # AI 답변에서 JSON 블록 { ... } 만 추출
-        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-            return [data.get(str(i), "분석 결과 없음") for i in range(ticker_count)]
-    except:
-        pass
-    # JSON 파싱 실패 시 차선책 (줄바꿈 등으로 대충 잘라보기)
-    lines = [line.strip() for line in raw_text.split('\n') if line.strip() and (':' in line or '-' in line)]
-    return lines if len(lines) >= ticker_count else None
+    return None, " / ".join(errors)
 
 def main():
-    today = datetime.now().strftime('%Y년 %m월 %d일')
-    header = f"━━━━━━━━━━━━━━━━━━━━\n🚀 **{today} 미증시 하이브리드 브리핑**\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    today = datetime.now().strftime('%Y-%m-%d')
+    header = f"━━━━━━━━━━━━━━━━━━━━\n🚀 **{today} 미증시 전략 보고서 (V4)**\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
-    collected_data = []
-    ai_input = ""
+    stock_info = []
+    ai_raw_input = ""
 
-    for i, ticker in enumerate(TICKERS):
+    # [데이터 수집 단계]
+    for ticker in TICKERS:
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period="2d")
             if hist.empty: continue
             
-            price = round(hist['Close'].iloc[-1], 2)
-            change = round(((price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100, 2)
-            news = "이슈 없음"
+            curr = round(hist['Close'].iloc[-1], 2)
+            prev = hist['Close'].iloc[-2]
+            change = round(((curr - prev) / prev) * 100, 2)
+            
+            news_title = "관련 뉴스 없음"
             if stock.news:
-                titles = [n.get('title') or n.get('content', {}).get('title') for n in stock.news[:2]]
-                news = " / ".join(filter(None, titles))
-
-            collected_data.append({'ticker': ticker, 'price': price, 'change': change, 'news': news})
-            ai_input += f"{i}: [{ticker}] 뉴스: {news}\n"
+                titles = [n.get('title') or n.get('content', {}).get('title', '') for n in stock.news[:2]]
+                news_title = " / ".join(filter(None, titles))
+            
+            stock_info.append({'ticker': ticker, 'price': curr, 'change': change, 'news': news_title})
+            ai_raw_input += f"[{ticker}] 가격 ${curr}({change}%), 뉴스: {news_title}\n"
         except: pass
 
-    # AI에게 JSON 형식으로 답변하도록 아주 엄격하게 명령
-    prompt = f"""
-    당신은 한국 투자 전문가입니다. 다음 뉴스 데이터를 읽고 각 번호에 맞는 한국어 요약을 'JSON' 형식으로만 답변하세요.
-    인사말이나 설명은 절대 하지 마세요. 오직 JSON만 출력하세요.
-    
-    데이터:
-    {ai_input}
-    
-    형식 예시:
-    {{
-      "0": "엔비디아는 AI 수요 증가로 상승세입니다.",
-      "1": "테슬라는 전기차 인도량 감소 우려가 있습니다."
-    }}
-    """
-
-    raw_response, engine = get_ai_response(prompt)
+    # [AI 분석 단계]
+    raw_response, status = get_ai_analysis(ai_raw_input)
     
     report_body = ""
-    if raw_response:
-        analyses = parse_analysis(raw_response, len(collected_data))
-        
-        if analyses:
-            header += f"💡 **활성 엔진:** `{engine}`\n\n"
-            for i, info in enumerate(collected_data):
-                txt = analyses[i] if i < len(analyses) else "분석 생성 오류"
-                emoji = "📈" if info['change'] >= 0 else "📉"
-                report_body += f"**{emoji} {info['ticker']}** | `${info['price']}` ({info['change']}%)\n> {txt}\n\n"
-        else:
-            # AI가 대답은 했는데 형식이 엉망일 경우 (디버깅 모드)
-            header += f"⚠️ **AI 답변 형식이 올바르지 않습니다.** (엔진: {engine})\n\n"
-            report_body += f"**[AI 원문 데이터]**\n{raw_response[:500]}...\n\n"
-    else:
-        header += "❌ **모든 AI 엔진 호출 실패**\n\n"
-        for info in collected_data:
+    if raw_response and " API 에러" not in status:
+        header += f"💡 **활성 엔진:** `{status}`\n\n"
+        # 유연한 파싱: 줄 단위로 읽어서 종목명이 포함된 줄을 찾습니다.
+        for info in stock_info:
             emoji = "📈" if info['change'] >= 0 else "📉"
-            report_body += f"**{emoji} {info['ticker']}** | `${info['price']}` ({info['change']}%)\n> 📰 {info['news']}\n\n"
+            # AI 답변에서 해당 티커가 포함된 줄 찾기
+            analysis_line = "분석 내용을 생성하지 못했습니다."
+            for line in raw_response.split('\n'):
+                if info['ticker'] in line:
+                    analysis_line = line.split(':')[-1].strip() if ':' in line else line.strip()
+                    break
+            
+            report_body += f"**{emoji} {info['ticker']}** | `${info['price']}` ({info['change']}%)\n"
+            report_body += f"> {analysis_line}\n\n"
+    else:
+        # [최종 방어] AI가 모두 실패했을 경우
+        header += f"⚠️ **AI 엔진 작동 불가** (원인: {status})\n\n"
+        for info in stock_info:
+            emoji = "📈" if info['change'] >= 0 else "📉"
+            report_body += f"**{emoji} {info['ticker']}** | `${info['price']}` ({info['change']}%)\n"
+            report_body += f"> 📰 {info['news']}\n\n"
 
     send_to_discord(header + report_body + "━━━━━━━━━━━━━━━━━━━━")
 
