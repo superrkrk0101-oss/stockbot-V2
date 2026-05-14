@@ -35,43 +35,69 @@ def get_stock_data(ticker):
         p_ticker = PEERS.get(ticker)
         peer_info = f"{p_ticker}" if p_ticker else "Market Leader"
         return {'ticker': ticker, 'price': round(curr['Close'], 2), 'change': change, 'ma': ma, 'rsi': rsi, 'vol': vol_ratio, 'peer': peer_info}
-    except: return None
+    except Exception as e:
+        print(f"[Data Error] {ticker}: {e}")
+        return None
 
 def get_ai_analysis(data):
     sign = "+" if data['change'] > 0 else ""
-    # 밸류에이션 제거 및 콤팩트한 프롬프트
     prompt = f"""
     Senior Analyst Mode: Analyze {data['ticker']} (${data['price']}, {sign}{data['change']}%).
     Data: MA5(${data['ma']['5']}), MA20(${data['ma']['20']}), RSI({data['rsi']}), Vol({data['vol']}%), Peer({data['peer']}).
-    
     Rules: 100% English. Bullet points. No intro/outro.
     Format:
     ▶ **Technical**: (Trend & RSI focus)
     ▶ **Market**: (Relative strength vs {data['peer']})
     ▶ **Outlook**: (Next move & key level)
     """
+    
+    # 1. Gemini 시도
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
-            res = genai.GenerativeModel('gemini-1.5-flash').generate_content(prompt)
-            return res.text, "Gemini"
-        except: pass
-    return "Analysis failed.", "None"
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            res = model.generate_content(prompt)
+            if res.text: return res.text, "Gemini"
+        except Exception as e:
+            print(f"[Gemini Fail] {data['ticker']}: {e}")
+
+    # 2. Groq 시도 (V7.7에서 빠졌던 부분 복구)
+    if GROQ_KEY:
+        try:
+            client = Groq(api_key=GROQ_KEY)
+            comp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return comp.choices[0].message.content, "Groq"
+        except Exception as e:
+            print(f"[Groq Fail] {data['ticker']}: {e}")
+
+    return "AI Analysis generation failed. Check your API Keys.", "None"
 
 def send_to_discord(message):
-    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
+    if DISCORD_WEBHOOK_URL:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
 
 def main():
     now = datetime.now()
-    header = f"🚀 **{now.strftime('%Y-%m-%d %H:%M')} Morning Report (V7.7)**\n━━━━━━━━━━━━━━━━━━━━\n"
+    header = f"🚀 **{now.strftime('%Y-%m-%d %H:%M')} Morning Report (V7.8)**\n━━━━━━━━━━━━━━━━━━━━\n"
     send_to_discord(header)
+    
     for ticker in TICKERS:
         data = get_stock_data(ticker)
         if data:
             analysis, engine = get_ai_analysis(data)
             sign = "+" if data['change'] > 0 else ""
-            report = f"### {'📈' if data['change']>=0 else '📉'} {data['ticker']} | `${data['price']}` ({sign}{data['change']}%)\n{analysis.strip()}\n"
+            emoji = '📈' if data['change'] >= 0 else '📉'
+            
+            report = f"### {emoji} {data['ticker']} | `${data['price']}` ({sign}{data['change']}%)\n"
+            report += f"> **Engine**: `{engine}`\n"
+            report += f"{analysis.strip()}\n"
+            report += "────────────────────"
+            
             send_to_discord(report)
             time.sleep(1)
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
