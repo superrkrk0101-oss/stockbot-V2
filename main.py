@@ -12,7 +12,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 2. 내가 매일 아침 분석받고 싶은 주식들
-tickers = ['NVDA', 'PLTR', 'APP', 'JEPI']
+tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG, SERV, META']
 
 def send_discord(message):
     payload = {"content": message}
