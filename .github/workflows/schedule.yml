@@ -1,28 +1,24 @@
-name: Morning Stock Bot
+name: Stock Analysis Bot
 
 on:
   schedule:
-    # 한국 시간 매일 아침 8시 실행 (UTC 기준 23시)
-    - cron: '0 23 * * *'
-  workflow_dispatch: # 수동 테스트 버튼 활성화
+    - cron: '0 23 * * *' # 한국 시간 오전 8시 (UTC 23:00)
+  workflow_dispatch: # 수동 실행 버튼
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    env:
+      # 이미지 속 경고를 해결하는 핵심 설정입니다.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
-      - name: 코드 가져오기
-        uses: actions/checkout@v4
-
-      - name: 파이썬 설치하기
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: 필요한 도구 설치하기
-        run: pip install -r requirements.txt
-
-      - name: 주식 브리핑 실행하기
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Install dependencies
+        run: pip install yfinance google-generativeai requests pandas
+      - name: Run script
         run: python main.py
