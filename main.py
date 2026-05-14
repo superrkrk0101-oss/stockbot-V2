@@ -24,7 +24,7 @@ def send_discord(message):
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
 
 def run_analysis():
-    tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META', 'JEPI']
+    tickers = ['NVDA', 'PLTR', 'LUNR', 'CEG', 'SERV', 'META']
     target_model = get_best_model()
     model = genai.GenerativeModel(target_model)
 
