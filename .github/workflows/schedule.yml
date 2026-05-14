@@ -1,33 +1,25 @@
-name: Stock Analysis Bot 2026
+name: Stock Analysis Light Bot
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 한국 시간 오전 8시 (UTC 23:00)
-  workflow_dispatch: # 수동 실행 버튼
+    - cron: '0 23 * * *' # 한국 시간 오전 8시
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     env:
-      # 1. 이미지 속 Node.js 경고 해결
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: Install dependencies
-        # 이동평균선 계산에 필요한 pandas와 데이터 수집용 yfinance를 명시적으로 설치
         run: |
           pip install --upgrade pip
-          pip install yfinance google-generativeai requests pandas
-
-      - name: Run Stock Analysis
-        # 프로그램이 도중에 죽더라도 에러 로그를 남기도록 실행
+          pip install yfinance google-generativeai requests
+      - name: Run main script
         run: python main.py
