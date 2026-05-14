@@ -3,142 +3,151 @@ import yfinance as yf
 import google.generativeai as genai
 from groq import Groq
 import requests
+import pandas as pd
 from datetime import datetime
 
-# [1] 설정 로드
+# API 설정
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-# 분석 종목 및 매칭되는 경쟁사(Peer) 설정
+# [수정] 분석 종목 및 경쟁사 설정
 TICKERS = ['NVDA', 'TSLA', 'CEG', 'WCC', 'SERV', 'LUNR']
 PEERS = {
-    'NVDA': 'AMD', 'TSLA': 'RIVN', 'CEG': 'VST', 
-    'WCC': 'GWW', 'SERV': 'AMZN', 'LUNR': 'SPCE'
+    'NVDA': 'AMD', 
+    'TSLA': None,    # 경쟁사 비교 제거 (독자적 분석)
+    'CEG': 'VST', 
+    'WCC': 'GWW', 
+    'SERV': 'AMZN', 
+    'LUNR': 'RKLB'   # 경쟁사 SPCE -> RKLB 수정
 }
 
-def send_to_discord(message):
-    if not DISCORD_WEBHOOK_URL: return
-    try:
-        for i in range(0, len(message), 1900):
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": message[i:i+1900]}, timeout=10)
-    except: pass
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
-def get_ai_analysis(input_data):
-    # 언어 혼착 방지를 위해 "순수 한국어" 및 "전문 용어 사용" 지침 강화
+def get_stock_data(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="150d")
+        if df.empty or len(df) < 120: return None
+
+        info = stock.info
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        price = round(curr['Close'], 2)
+        change = round(((curr['Close'] - prev['Close']) / prev['Close']) * 100, 2)
+        
+        # 기술적 지표
+        ma5 = df['Close'].rolling(window=5).mean().iloc[-1]
+        ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+        ma60 = df['Close'].rolling(window=60).mean().iloc[-1]
+        ma120 = df['Close'].rolling(window=120).mean().iloc[-1]
+        rsi = round(calculate_rsi(df['Close']).iloc[-1], 2)
+        
+        avg_vol_20 = df['Volume'].tail(20).mean()
+        vol_ratio = round((curr['Volume'] / avg_vol_20) * 100, 1)
+
+        # 재무 지표
+        eps = info.get('trailingEps', 0)
+        pe_ratio = info.get('trailingPE', 0)
+        fair_value = round(eps * pe_ratio, 2) if eps and pe_ratio else 0
+
+        # [수정] 경쟁사 동향 로직
+        p_ticker = PEERS.get(ticker)
+        peer_info = "독보적 시장 지위(비교 대상 없음)"
+        if p_ticker:
+            p_hist = yf.Ticker(p_ticker).history(period="2d")
+            if not p_hist.empty:
+                p_change = round(((p_hist['Close'].iloc[-1] - p_hist['Close'].iloc[-2]) / p_hist['Close'].iloc[-2]) * 100, 2)
+                p_sign = "+" if p_change > 0 else ""
+                peer_info = f"{p_ticker}({p_sign}{p_change}%)"
+
+        news = " / ".join([n.get('title', '') for n in stock.news[:3]])
+
+        return {
+            'ticker': ticker, 'price': price, 'change': change,
+            'ma': {'5': ma5, '20': ma20, '60': ma60, '120': ma120},
+            'rsi': rsi, 'vol_ratio': vol_ratio, 'peer': peer_info,
+            'eps': eps, 'pe': pe_ratio, 'fair_value': fair_value, 'news': news
+        }
+    except Exception as e:
+        print(f"{ticker} 데이터 수집 중 에러: {e}")
+        return None
+
+def get_professional_analysis(data_list):
     prompt = f"""
-    당신은 월스트리트 출신의 퀀트 분석가입니다. 제공된 데이터를 바탕으로 심층 분석 리포트를 작성하세요.
-    
-    [데이터]
-    {input_data}
-    
-    [작성 규칙 - 필독]
-    1. **반드시 순수 한국어로만 작성하세요.** (empresa, entreprise 같은 외국어나 불필요한 한자 혼용 금지)
-    2. 단순히 뉴스 요약이 아니라, '거래량 변화'와 '경쟁사 대비 성과'를 연계하여 주가 변동의 원인을 분석하세요.
-    3. 종목당 3문장 내외로 전문성 있게 작성하세요.
-    4. 형식: '종목명: 분석내용'
+    당신은 월스트리트 시니어 애널리스트입니다. 아래 데이터를 바탕으로 전문 리포트를 '한국어'로 작성하세요.
+    외국어나 한자 혼용을 절대 금지하며 100% 순수 한국어 금융 용어만 사용하세요.
+
+    데이터:
+    {data_list}
+
+    [필수 항목]
+    1. 투자 핵심 요약: 투자의견 및 주요 뉴스.
+    2. 기술적 지표 분석: 이평선 정배열/역배열, 거래량 신뢰도, RSI 위치.
+    3. 기본적 분석 및 밸류에이션: $Fair Value = EPS \\times Target P/E$ 관점의 분석.
+    4. 시장 맥락: 경쟁사 수익률과의 비교(경쟁사가 없는 경우 시장 지배력 분석).
+    5. 향후 전망 및 리스크 관리 전략.
     """
     
-    # Gemini 시도
+    # Gemini -> Groq 순차 호출
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt)
-            if response.text: return response.text, "Gemini"
+            res = model.generate_content(prompt)
+            if res.text: return res.text, "Gemini"
         except: pass
 
-    # Groq 시도 (Llama 3.3 모델 사용)
     if GROQ_KEY:
         try:
             client = Groq(api_key=GROQ_KEY)
-            completion = client.chat.completions.create(
+            comp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}]
             )
-            return completion.choices[0].message.content, "Groq"
+            return comp.choices[0].message.content, "Groq"
         except: pass
-
-    return None, "AI 호출 실패"
-
-def get_stock_details(ticker):
-    """거래량 및 경쟁사 데이터를 포함한 상세 정보를 가져옵니다."""
-    stock = yf.Ticker(ticker)
-    # 10일치 데이터를 가져와 평균 거래량 계산
-    hist = stock.history(period="10d")
-    if hist.empty or len(hist) < 2: return None
-
-    curr = hist.iloc[-1]
-    prev = hist.iloc[-2]
     
-    price = round(curr['Close'], 2)
-    change_pct = round(((curr['Close'] - prev['Close']) / prev['Close']) * 100, 2)
-    
-    # 거래량 분석 (오늘 거래량 vs 10일 평균 거래량)
-    avg_vol = hist['Volume'].mean()
-    vol_ratio = round((curr['Volume'] / avg_vol) * 100, 1)
-    vol_status = "급증" if vol_ratio > 150 else ("저조" if vol_ratio < 70 else "평이")
-
-    # 경쟁사 동향 가져오기
-    peer_ticker = PEERS.get(ticker)
-    peer_info = "정보 없음"
-    if peer_ticker:
-        p_stock = yf.Ticker(peer_ticker)
-        p_hist = p_stock.history(period="2d")
-        if not p_hist.empty:
-            p_change = round(((p_hist['Close'].iloc[-1] - p_hist['Close'].iloc[-2]) / p_hist['Close'].iloc[-2]) * 100, 2)
-            p_sign = "+" if p_change > 0 else ""
-            peer_info = f"{peer_ticker}({p_sign}{p_change}%)"
-
-    news = "없음"
-    if stock.news:
-        news = " / ".join([n.get('title', '') for n in stock.news[:2]])
-
-    return {
-        'price': price, 'change': change_pct, 'vol_ratio': vol_ratio,
-        'vol_status': vol_status, 'peer': peer_info, 'news': news
-    }
+    return None, "모든 엔진 실패"
 
 def main():
     today = datetime.now().strftime('%Y-%m-%d')
-    header = f"━━━━━━━━━━━━━━━━━━━━\n🚀 **{today} 미증시 심층 전략 보고서 (V6)**\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    header = f"📊 **{today} 월스트리트 모닝 리포트 (V7.1)**\n━━━━━━━━━━━━━━━━━━━━\n"
     
-    stock_list = []
-    ai_input = ""
-
+    stock_results = []
     for ticker in TICKERS:
-        data = get_stock_details(ticker)
-        if data:
-            stock_list.append({'ticker': ticker, **data})
-            ai_input += (f"[{ticker}] 가격:${data['price']}({data['change']}%), "
-                        f"거래량:평균대비 {data['vol_ratio']}%({data['vol_status']}), "
-                        f"경쟁사:{data['peer']}, 뉴스:{data['news']}\n")
+        data = get_stock_data(ticker)
+        if data: stock_results.append(data)
 
-    raw_res, engine = get_ai_analysis(ai_input)
+    analysis_txt, engine = get_professional_analysis(stock_results)
+    final_report = header + f"💡 **분석 엔진:** `{engine}`\n\n"
     
-    report_body = ""
-    if raw_res and "실패" not in engine:
-        header += f"💡 **활성 엔진:** `{engine}`\n\n"
-        for s in stock_list:
-            sign = "+" if s['change'] > 0 else ""
-            emoji = "📈" if s['change'] >= 0 else "📉"
-            
-            # AI 답변 파싱
-            analysis = "분석을 생성하지 못했습니다."
-            for line in raw_res.split('\n'):
-                if s['ticker'].lower() in line.lower():
-                    analysis = line.split(':')[-1].strip() if ':' in line else line.strip()
-                    break
+    for stock in stock_results:
+        sign = "+" if stock['change'] > 0 else ""
+        emoji = "📈" if stock['change'] >= 0 else "📉"
+        
+        content = "분석 생성 실패"
+        # 티커별 블록 파싱 (대소문자 구분 없이)
+        for block in analysis_txt.split('\n\n'):
+            if stock['ticker'].upper() in block.upper():
+                content = block.split(':', 1)[-1].strip() if ':' in block else block
+                break
 
-            report_body += f"**{emoji} {s['ticker']}** | `${s['price']}` (**{sign}{s['change']}%**)\n"
-            report_body += f"> {analysis}\n\n"
-    else:
-        header += f"⚠️ **분석 엔진 오류 ({engine})**\n\n"
-        for s in stock_list:
-            sign = "+" if s['change'] > 0 else ""
-            report_body += f"**{s['ticker']}** | `${s['price']}` ({sign}{s['change']}%)\n> {s['news']}\n\n"
+        final_report += f"### {emoji} {stock['ticker']} | `${stock['price']}` ({sign}{stock['change']}%)\n"
+        final_report += f"{content}\n\n"
 
-    send_to_discord(header + report_body + "━━━━━━━━━━━━━━━━━━━━")
+    send_to_discord(final_report + "━━━━━━━━━━━━━━━━━━━━")
+
+def send_to_discord(message):
+    if DISCORD_WEBHOOK_URL:
+        for i in range(0, len(message), 1900):
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": message[i:i+1900]})
 
 if __name__ == "__main__":
     main()
