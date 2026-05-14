@@ -1,8 +1,8 @@
-name: Stock Analysis 2-Track Bot
+name: Veritas Stock Bot V4
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 한국 시간 오전 8시
+    - cron: '0 23 * * *' # 한국시간 오전 8시
   workflow_dispatch:
 
 jobs:
@@ -12,15 +12,16 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }} # Groq 키 추가
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - name: Install dependencies
+        # 핵심 도구들을 최신 버전으로 강제 설치합니다.
         run: |
           pip install --upgrade pip
-          pip install yfinance google-generativeai requests groq # groq 라이브러리 추가
+          pip install yfinance google-generativeai requests groq pandas
       - name: Run script
         run: python main.py
