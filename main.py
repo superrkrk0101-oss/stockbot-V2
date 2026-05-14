@@ -68,37 +68,33 @@ def get_stock_data(ticker):
         return None
 
 def get_ai_analysis(data):
-    """영문 분석 후 한국어 번역 프로세스"""
+    """분석 결과는 100% 영문으로 수행 (V7.5 로직 유지)"""
     sign = "+" if data['change'] > 0 else ""
     
-    # Step 1: Professional Analysis in English
-    # Step 2: Translate to Clean Korean (No Hanja)
     prompt = f"""
-    [Task 1: Deep Analysis]
-    As a Wall Street Senior Analyst, analyze {data['ticker']} based on:
-    - Price: ${data['price']} ({sign}{data['change']}%)
+    You are a Senior Wall Street Analyst. 
+    Analyze the following stock data and provide a professional report STRICTLY in English.
+
+    [STOCK DATA]
+    - Ticker: {data['ticker']} / Current Price: ${data['price']} ({sign}{data['change']}%)
     - Moving Averages: 5D(${data['ma']['5']}), 20D(${data['ma']['20']}), 60D(${data['ma']['60']}), 120D(${data['ma']['120']})
     - RSI: {data['rsi']} / Volume Ratio: {data['vol_ratio']}%
-    - Peer Performance: {data['peer']}
+    - Peer Comparison: {data['peer']}
     - Fundamentals: EPS {data['eps']}, P/E {data['pe']}
-    - News: {data['news']}
+    - Recent News: {data['news']}
 
-    [Task 2: Translation & Formatting]
-    Translate the analysis into professional Korean using the format below.
-    CRITICAL RULES:
-    1. STRICTLY NO CHINESE CHARACTERS (Hanja). Use pure Korean or standard financial terms.
-    2. Use Bullet points (▶) for visibility.
-    3. Tone: Polite and professional (존댓말).
-    4. ONLY output the final Korean translation.
+    [OUTPUT RULES]
+    1. Output MUST BE 100% in ENGLISH only.
+    2. No other languages allowed.
+    3. Use professional and concise terminology.
 
-    [Output Format]
-    ▶ **기술적 관점**: (Moving average trends, volume reliability, RSI analysis)
-    ▶ **시장 및 경쟁**: (Relative performance against peers or market position)
-    ▶ **밸류에이션**: (Assessment of price relative to EPS and P/E)
-    ▶ **리스크 및 전망**: (Short-term risks and future outlook)
+    [OUTPUT FORMAT]
+    ▶ **Technical Perspective**: 
+    ▶ **Market & Peer Context**: 
+    ▶ **Valuation Analysis**: 
+    ▶ **Risks & Outlook**: 
     """
     
-    # AI 엔진 호출 (Gemini 우선)
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
@@ -117,7 +113,7 @@ def get_ai_analysis(data):
             return comp.choices[0].message.content, "Groq"
         except: pass
     
-    return "분석 생성 실패", "None"
+    return "Analysis generation failed.", "None"
 
 def send_to_discord(message):
     if DISCORD_WEBHOOK_URL:
@@ -125,9 +121,14 @@ def send_to_discord(message):
             requests.post(DISCORD_WEBHOOK_URL, json={"content": message[i:i+1900]})
 
 def main():
-    today = datetime.now().strftime('%Y-%m-%d')
-    header = f"🚀 **{today} 월스트리트 모닝 리포트 (V7.4)**\n"
-    header += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    # 현재 날짜와 시간 가져오기
+    now = datetime.now()
+    date_str = now.strftime('%Y-%m-%d')
+    time_str = now.strftime('%H:%M:%S')
+    
+    # 헤더에 시간 추가 (V7.6)
+    header = f"🚀 **{date_str} {time_str} Wall Street Morning Report (V7.6)**\n"
+    header += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     send_to_discord(header)
 
     for ticker in TICKERS:
@@ -138,9 +139,9 @@ def main():
             emoji = "📈" if data['change'] >= 0 else "📉"
             
             report = f"### {emoji} {data['ticker']} | `${data['price']}` ({sign}{data['change']}%)\n"
-            report += f"> **분석 엔진**: `{engine}`\n"
+            report += f"> **Analysis Engine**: `{engine}`\n"
             report += f"{analysis_text.strip()}\n"
-            report += "──────────────────────────\n"
+            report += "────────────────────────────────────\n"
             
             send_to_discord(report)
             time.sleep(1)
