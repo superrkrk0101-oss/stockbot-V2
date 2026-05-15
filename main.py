@@ -1,16 +1,14 @@
 import os
 import yfinance as yf
 import google.generativeai as genai
-from groq import Groq
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import time
 
-# 환경 변수 로드
+# 환경 변수 로드 (Groq 관련 변수 완전히 제거)
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
-GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
 TICKERS = ['NVDA', 'TSLA', 'CRCL', 'CEG', 'WCC', 'SERV', 'LUNR']
 PEERS = {'NVDA': 'AMD', 'TSLA': 'BYD', 'CRCL': 'COIN', 'CEG': 'VST', 'WCC': 'GWW', 'SERV': 'AMZN', 'LUNR': 'RKLB'}
@@ -42,23 +40,18 @@ def get_stock_data(ticker):
 def get_ai_analysis(data):
     prompt = f"애널리스트로서 {data['ticker']} 분석: 현재가 ${data['price']}({data['change']}%), RSI {data['rsi']}, 거래량 {data['vol']}%. 한자 없이 한국어 존댓말로 ▶기술적 지표, ▶시장 상황, ▶향후 전망 위주로 핵심 요약하세요."
     
-    # 1순위: 최신 Gemini 2.0 모델 호출
+    # 오직 최신 인지된 표준인 Gemini 2.0 모델만 호출
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
-            # 모델명을 기존 1.5에서 최신 2.0-flash로 수정했습니다.
             res = genai.GenerativeModel('gemini-2.0-flash').generate_content(prompt)
-            if res.text: return res.text.strip(), "Gemini"
-        except: pass
-        
-    # 2순위: Groq 백업 작동
-    if GROQ_KEY:
-        try:
-            res = Groq(api_key=GROQ_KEY).chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": prompt}])
-            return res.choices[0].message.content.strip(), "Groq"
-        except: pass
-        
-    return "분석 실패", "None"
+            if res.text: 
+                return res.text.strip(), "Gemini"
+        except Exception as e:
+            # 제미나이가 실패하면 디스코드로 구체적인 에러 내용을 보냅니다.
+            return f"Gemini 구동 실패! 에러 내용: {e}", "Gemini_Error"
+            
+    return "Gemini API 키(GEMINI_API_KEY)를 찾을 수 없습니다.", "None"
 
 def main():
     kst = timezone(timedelta(hours=9))
