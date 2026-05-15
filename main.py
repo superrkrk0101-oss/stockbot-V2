@@ -13,9 +13,9 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
 # 분석 대상 및 경쟁사 매핑
-TICKERS = ['NVDA', 'TSLA', 'CEG', 'WCC', 'SERV', 'LUNR']
+TICKERS = ['NVDA', 'TSLA', 'CRCL','CEG', 'WCC', 'SERV', 'LUNR']
 PEERS = {
-    'NVDA': 'AMD', 'TSLA': None, 'CEG': 'VST', 
+    'NVDA': 'AMD', 'TSLA': None,'CRCL': None, 'CEG': 'VST', 
     'WCC': 'GWW', 'SERV': 'AMZN', 'LUNR': 'RKLB'
 }
 
