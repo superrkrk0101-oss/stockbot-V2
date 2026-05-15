@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '0 23 * * *' # 매일 한국 시간(KST) 아침 8시 자동 실행
   workflow_dispatch:      # 깃허브에서 버튼 눌러서 수동 실행
-  repository_dispatch:    # 메이크(Make)나 외부에서 호출 시 실행
+  repository_dispatch:    # 메이크(Make)나 외부에서 호출 시 실행 [필수 코드 층]
     types: [run-stock-bot]
 
 jobs:
