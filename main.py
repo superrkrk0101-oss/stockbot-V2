@@ -1,19 +1,17 @@
 import os
 import yfinance as yf
 import google.generativeai as genai
-from groq import Groq
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import time
 
-# 환경 변수 로드
+# 환경 변수 로드 (그록 제거)
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
-GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-TICKERS = ['NVDA', 'TSLA', 'CRCL', 'CEG', 'WCC', 'SERV', 'LUNR']
-PEERS = {'NVDA': 'AMD', 'TSLA': 'BYD', 'CRCL': 'COIN', 'CEG': 'VST', 'WCC': 'GWW', 'SERV': 'AMZN', 'LUNR': 'RKLB'}
+# 분석 대상을 CRCL 단일 종목으로 변경
+TICKERS = ['CRCL']
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -34,50 +32,48 @@ def get_stock_data(ticker):
             'ma5': round(df['Close'].rolling(5).mean().iloc[-1], 2),
             'ma20': round(df['Close'].rolling(20).mean().iloc[-1], 2),
             'rsi': round(calculate_rsi(df['Close']).iloc[-1], 2),
-            'vol': round((curr['Volume'] / df['Volume'].tail(20).mean()) * 100, 1),
-            'peer': PEERS.get(ticker, "시장 주도주")
+            'vol': round((curr['Volume'] / df['Volume'].tail(20).mean()) * 100, 1)
         }
     except: return None
 
 def get_ai_analysis(data):
-    prompt = f"애널리스트로서 {data['ticker']} 분석: 현재가 ${data['price']}({data['change']}%), RSI {data['rsi']}, 거래량 {data['vol']}%. 한글로만 ▶기술적 지표, ▶시장 상황, ▶향후 전망 핵심 요약."
+    # 제미나이의 깊이 있는 분석을 유도하는 프롬프트
+    prompt = (
+        f"당신은 월스트리트의 수석 애널리스트입니다. {data['ticker']} 종목을 정밀 분석하세요.\n"
+        f"현재가: ${data['price']} ({data['change']}%)\n"
+        f"RSI: {data['rsi']}, 거래량 비율: {data['vol']}%\n\n"
+        "다음 세 가지 관점에서 한국어 존댓말로 핵심을 짚어주세요:\n"
+        "1. 기술적 지표 해석 (현재 주가 위치와 에너지)\n"
+        "2. 현재 시장 상황과 연계된 분석\n"
+        "3. 단기 및 중장기 향후 전망과 대응 전략\n"
+        "한자는 사용하지 마세요."
+    )
     
-    # 1순위: Gemini (속도 제한에 걸릴 수 있음)
     if GEMINI_KEY:
         try:
             genai.configure(api_key=GEMINI_KEY)
-            res = genai.GenerativeModel('gemini-2.0-flash').generate_content(prompt)
-            if res.text: return res.text.strip(), "Gemini"
+            # 장기 기억한 대로 2.0-flash 모델 사용
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            res = model.generate_content(prompt)
+            if res.text: 
+                return res.text.strip(), "Gemini 2.0 Flash"
         except Exception as e:
-            print(f"Gemini 한도 초과 또는 오류: {e}")
-            pass # 실패 시 Groq으로 넘어감
-
-    # 2순위: Groq (Gemini가 429 에러를 뱉을 때 구원투수 역할)
-    if GROQ_KEY:
-        try:
-            res = Groq(api_key=GROQ_KEY).chat.completions.create(
-                model="llama-3.3-70b-versatile", 
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return res.choices[0].message.content.strip(), "Groq"
-        except: pass
-        
-    return "현재 모든 AI 엔진이 바쁩니다.", "None"
+            return f"Gemini 분석 중 오류 발생: {e}", "Gemini_Error"
+            
+    return "API 키를 확인해주세요.", "None"
 
 def main():
     kst = timezone(timedelta(hours=9))
     now = datetime.now(kst)
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🚀 **모닝 리포트 | {now.strftime('%Y-%m-%d %H:%M')}**\n━━━━━━━━━━━━━━━━━━━━━━━━"})
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🎯 **Gemini 단독 정밀 분석 리포트 | {now.strftime('%Y-%m-%d %H:%M')}**\n━━━━━━━━━━━━━━━━━━━━━━━━"})
     
     for ticker in TICKERS:
         data = get_stock_data(ticker)
         if data:
             analysis, engine = get_ai_analysis(data)
             emoji = '📈' if data['change'] >= 0 else '📉'
-            report = f"### {emoji} {data['ticker']} | `${data['price']}` ({data['change']}%)\n> **엔진**: `{engine}`\n{analysis}\n────────────────────"
+            report = f"### {emoji} {data['ticker']} 정밀 리포트\n> **분석 엔진**: `{engine}`\n\n{analysis}\n────────────────────"
             requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
-            # 💡 속도 제한(429)을 피하기 위해 간격을 8초로 늘렸습니다.
-            time.sleep(8) 
 
 if __name__ == "__main__":
     main()
