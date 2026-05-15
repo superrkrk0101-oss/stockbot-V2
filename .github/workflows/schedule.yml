@@ -18,7 +18,7 @@ jobs:
     - name: 🐍 2. 파이썬 환경 세팅
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.11' # 경고 해결을 위한 버전업
 
     - name: 📦 3. 필수 라이브러리 설치
       run: |
@@ -26,7 +26,7 @@ jobs:
         pip install -r requirements.txt
 
     - name: 🚀 4. 주식 분석 스크립트 실행
-      env:
+      env: # 보안을 위해 스크립트 실행 시에만 API 키 주입
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
