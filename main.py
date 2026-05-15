@@ -15,7 +15,7 @@ GROQ_KEY = os.environ.get('GROQ_API_KEY')
 # 분석 대상 및 경쟁사 매핑
 TICKERS = ['NVDA', 'TSLA', 'CRCL','CEG', 'WCC', 'SERV', 'LUNR']
 PEERS = {
-    'NVDA': 'AMD', 'TSLA': None,'CRCL': None, 'CEG': 'VST', 
+    'NVDA': 'AMD', 'TSLA': None,'CRCL': COIN, 'CEG': 'VST', 
     'WCC': 'GWW', 'SERV': 'AMZN', 'LUNR': 'RKLB'
 }
 
